@@ -1,58 +1,70 @@
-#ifndef ARPCACHE_H
-#define ARPCACHE_H
+#ifndef ROUTERLIB_DETAIL_ARPCACHE_H
+#define ROUTERLIB_DETAIL_ARPCACHE_H
 
-#include <chrono>
 #include <unordered_map>
-#include <thread>
+#include <vector>
+#include <string>
+#include <chrono>
 #include <optional>
-#include <memory>
-#include <mutex>
 
-#include "IPacketSender.h"
-#include "RouterTypes.h"
 #include "IRoutingTable.h"
+#include "IPacketSender.h"
+
+namespace RouterLib::detail {
 
 struct ArpEntry {
-    std::chrono::steady_clock::time_point timeAdded;
-    // TODO: Fill in this struct... and maybe add more structs
+    mac_addr mac;
+    std::chrono::steady_clock::time_point added;
+};
+
+struct PacketQueueItem {
+    Packet packet;
+    std::string inIface;   // interface on which the packet was received (for ICMP errors)
+    std::string outIface;  // interface on which packet will be sent out
+};
+
+struct ArpRequest {
+    ip_addr ip; // IP address (network order) waiting for resolution
+    std::vector<PacketQueueItem> waitingPackets;
+    std::chrono::steady_clock::time_point lastSent;
+    int attempts;
 };
 
 class ArpCache {
 public:
-    ArpCache(
-        std::chrono::milliseconds entryTimeout,
-        std::chrono::milliseconds tickInterval,
-        std::chrono::milliseconds resendInterval,
-        std::shared_ptr<IPacketSender> packetSender, 
-        std::shared_ptr<IRoutingTable> routingTable);
+    ArpCache(std::chrono::milliseconds timeout, std::chrono::milliseconds tickInterval,
+             std::chrono::milliseconds resendInterval,
+             std::shared_ptr<IPacketSender> sender,
+             std::shared_ptr<IRoutingTable> routingTable);
+    ~ArpCache() = default;
 
-    ~ArpCache();
-
+    // Check if MAC is in cache for given IP
+    std::optional<mac_addr> lookup(ip_addr ip);
+    // Queue a packet for the given IP (if not already resolved). Sends ARP request if needed.
+    void queueRequest(ip_addr ip, Packet packet, const std::string& outIface, const std::string& inIface);
+    // Handle an incoming ARP request packet
+    void handleArpRequest(const Packet& packet, const std::string& inIface);
+    // Handle an incoming ARP reply packet
+    void handleArpReply(const Packet& packet);
+    // Periodic tick to resend ARP requests and timeout cache entries
     void tick();
 
-    void addEntry(uint32_t ip, const mac_addr& mac);
-
-    std::optional<mac_addr> getEntry(uint32_t ip);
-
-    void queuePacket(uint32_t ip, const Packet& packet, const std::string& iface);
-
 private:
-    void loop();
+    void sendArpRequest(ip_addr ip, const std::string& outIface);
+    void insertMapping(ip_addr ip, const mac_addr& mac);
 
-    std::chrono::milliseconds entryTimeout;
+    std::unordered_map<ip_addr, ArpEntry> cache;    // ARP cache: IP -> (MAC, timestamp)
+    std::vector<ArpRequest> requests;               // pending ARP requests
+
+    std::chrono::milliseconds timeout;
     std::chrono::milliseconds tickInterval;
     std::chrono::milliseconds resendInterval;
+    std::chrono::steady_clock::time_point lastTick;
 
-    std::unique_ptr<std::thread> thread;
-    std::atomic<bool> shutdown = false;
-
-    std::mutex mutex;
-    std::shared_ptr<IPacketSender> packetSender;
-    std::shared_ptr<IRoutingTable> routingTable;
-
-    std::unordered_map<ip_addr, ArpEntry> entries;
+    std::shared_ptr<IPacketSender> sender;
+    std::shared_ptr<IRoutingTable> rt;
 };
 
+} // namespace RouterLib::detail
 
-
-#endif //ARPCACHE_H
+#endif // ROUTERLIB_DETAIL_ARPCACHE_H

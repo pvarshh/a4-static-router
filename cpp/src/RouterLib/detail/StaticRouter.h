@@ -1,30 +1,31 @@
-#ifndef ROUTERLIB_DETAIL_STATICROUTER_H
-#define ROUTERLIB_DETAIL_STATICROUTER_H
-
-#include <memory>
-#include <string>
+#ifndef STATICROUTER_H
+#define STATICROUTER_H
 #include <vector>
+#include <memory>
+#include <mutex>
 
-#include "IStaticRouter.h"
-#include "IRoutingTable.h"
-#include "IPacketSender.h"
 #include "ArpCache.h"
-
-namespace RouterLib::detail {
+#include "IPacketSender.h"
+#include "IRoutingTable.h"
+#include "IStaticRouter.h"
 
 class StaticRouter : public IStaticRouter {
 public:
-    StaticRouter(std::unique_ptr<ArpCache> arpCache,
-                 std::shared_ptr<IRoutingTable> routingTable,
-                 std::shared_ptr<IPacketSender> packetSender);
-    ~StaticRouter() = default;
-    void handlePacket(std::vector<uint8_t> packet, std::string iface) override;
+    StaticRouter(
+        std::unique_ptr<ArpCache> arpCache, 
+        std::shared_ptr<IRoutingTable> routingTable,
+        std::shared_ptr<IPacketSender> packetSender);
+
+    virtual void handlePacket(std::vector<uint8_t> packet, std::string iface) override;
+
 private:
+    std::mutex mutex;
+
+    std::shared_ptr<IRoutingTable> routingTable;
+    std::shared_ptr<IPacketSender> packetSender;
+
     std::unique_ptr<ArpCache> arpCache;
-    std::shared_ptr<IRoutingTable> rt;
-    std::shared_ptr<IPacketSender> sender;
 };
 
-} // namespace RouterLib::detail
 
-#endif // ROUTERLIB_DETAIL_STATICROUTER_H
+#endif //STATICROUTER_H

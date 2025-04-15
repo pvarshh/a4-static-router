@@ -13,13 +13,15 @@ endif()
 include(CheckCXXSourceRuns)
 include(FetchContent)
 
-
-FetchContent_Declare(
+find_package(spdlog QUIET)
+if(NOT spdlog_FOUND)
+    FetchContent_Declare(
         spdlog
         GIT_REPOSITORY https://github.com/gabime/spdlog.git
         GIT_TAG v1.14.1
-)
-FetchContent_MakeAvailable(spdlog)
+    )
+    FetchContent_MakeAvailable(spdlog)
+endif()
 
 find_package(Boost REQUIRED COMPONENTS system thread)
 

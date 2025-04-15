@@ -7,14 +7,16 @@
 #include <optional>
 #include <memory>
 #include <mutex>
+#include <vector>
+#include <cstring>
 
 #include "IPacketSender.h"
 #include "RouterTypes.h"
 #include "IRoutingTable.h"
 
+// Extended ARP entry to store resolved MAC address, pending state, and a queue of waiting packets.
 struct ArpEntry {
     std::chrono::steady_clock::time_point timeAdded;
-    // TODO: Fill in this struct... and maybe add more structs
     mac_addr mac;              // Resolved MAC address.
     bool valid = false;        // True if the ARP entry has been resolved.
     int requestCount = 0;      // Number of ARP requests sent.
@@ -58,7 +60,5 @@ private:
 
     std::unordered_map<ip_addr, ArpEntry> entries;
 };
-
-
 
 #endif //ARPCACHE_H

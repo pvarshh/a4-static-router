@@ -7,7 +7,6 @@
 #include "protocol.h"
 #include "utils.h"
 
-
 ArpCache::ArpCache(
     std::chrono::milliseconds entryTimeout, 
     std::chrono::milliseconds tickInterval, 
@@ -18,7 +17,8 @@ ArpCache::ArpCache(
 , tickInterval(tickInterval)
 , resendInterval(resendInterval)
 , packetSender(std::move(packetSender))
-, routingTable(std::move(routingTable)) {
+, routingTable(std::move(routingTable))
+{
     thread = std::make_unique<std::thread>(&ArpCache::loop, this);
 }
 
@@ -38,9 +38,8 @@ void ArpCache::loop() {
 
 void ArpCache::tick() {
     std::unique_lock lock(mutex);
-    // TODO: Your code here
-
     auto now = std::chrono::steady_clock::now();
+
     // Process pending ARP requests: if it's time to resend, do so (up to 7 attempts)
     for (auto& [ip, entry] : entries) {
         if (!entry.valid) {
@@ -49,15 +48,15 @@ void ArpCache::tick() {
                     // After 7 attempts, drop queued packets and log an error.
                     for (const auto &pkt_info : entry.pendingPackets) {
                         spdlog::error("ARP request for IP {} failed 7 times. Dropping queued packet.", ip);
-                        // may also send an ICMP host unreachable.
+                        // In a full implementation, you may also send an ICMP host unreachable.
                     }
                     entry.pendingPackets.clear();
-                } 
-                else {
+                } else {
                     spdlog::info("Resending ARP request for IP: {}", ip);
-                    // Pseudo-code: Build and send an ARP request packet.
-                    Packet arpReq = buildArpRequest(ip);
-                    packetSender->sendPacket(arpReq, <appropriate-interface>);
+                    // *** ARP REQUEST PACKET GENERATION NOT IMPLEMENTED ***
+                    // Example:
+                    // Packet arpReq = buildArpRequest(ip);
+                    // packetSender->sendPacket(arpReq, /* appropriate interface */);
                     entry.lastRequestSent = now;
                     entry.requestCount++;
                 }
@@ -65,18 +64,14 @@ void ArpCache::tick() {
         }
     }
 
-    // TODO: Your code should end here
-
-    // Remove entries that have been in the cache for too long
-    std::erase_if(entries, [this](const auto& entry) {
-        return std::chrono::steady_clock::now() - entry.second.timeAdded >= entryTimeout;
+    // Remove entries that have timed out.
+    std::erase_if(entries, [this, now](const auto& pair) {
+        return now - pair.second.timeAdded >= entryTimeout;
     });
 }
 
 void ArpCache::addEntry(uint32_t ip, const mac_addr& mac) {
     std::unique_lock lock(mutex);
-
-    // TODO: Your code below
     auto now = std::chrono::steady_clock::now();
     auto it = entries.find(ip);
     if (it != entries.end()) {
@@ -88,13 +83,12 @@ void ArpCache::addEntry(uint32_t ip, const mac_addr& mac) {
         for (const auto &pkt_info : it->second.pendingPackets) {
             Packet pkt = pkt_info.first;
             const std::string& iface = pkt_info.second;
-            // Update packet's Ethernet header destination MAC to the resolved MAC.
-            // ie setDestinationMac(pkt, mac);
+            // *** Update packet's Ethernet header destination MAC to the resolved MAC ***
+            // For example: setDestinationMac(pkt, mac);
             packetSender->sendPacket(pkt, iface);
         }
         it->second.pendingPackets.clear();
-    }
-    else {
+    } else {
         // Create a new valid entry.
         ArpEntry entry;
         entry.mac = mac;
@@ -107,20 +101,15 @@ void ArpCache::addEntry(uint32_t ip, const mac_addr& mac) {
 
 std::optional<mac_addr> ArpCache::getEntry(uint32_t ip) {
     std::unique_lock lock(mutex);
-
-    // TODO: Your code below
     auto it = entries.find(ip);
     if (it != entries.end() && it->second.valid) {
         return it->second.mac;
     }
-
-    return std::nullopt; // Placeholder
+    return std::nullopt;
 }
 
 void ArpCache::queuePacket(uint32_t ip, const Packet& packet, const std::string& iface) {
     std::unique_lock lock(mutex);
-
-    // TODO: Your code below
     auto now = std::chrono::steady_clock::now();
     auto it = entries.find(ip);
     if (it == entries.end()) {
@@ -133,15 +122,14 @@ void ArpCache::queuePacket(uint32_t ip, const Packet& packet, const std::string&
         entry.pendingPackets.push_back({packet, iface});
         entries[ip] = std::move(entry);
         spdlog::info("Sending initial ARP request for IP: {}", ip);
-        // Pseudo-code: Build and send ARP request:
-        Packet arpReq = buildArpRequest(ip);
-        packetSender->sendPacket(arpReq, iface);
-    }
-    else {
+        // *** ARP REQUEST PACKET GENERATION NOT IMPLEMENTED ***
+        // Example:
+        // Packet arpReq = buildArpRequest(ip);
+        // packetSender->sendPacket(arpReq, iface);
+    } else {
         if (!it->second.valid) {
             it->second.pendingPackets.push_back({packet, iface});
-        }
-        else {
+        } else {
             // If entry is valid, send the packet immediately.
             packetSender->sendPacket(packet, iface);
         }

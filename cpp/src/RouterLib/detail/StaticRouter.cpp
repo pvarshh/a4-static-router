@@ -51,6 +51,87 @@ StaticRouter::StaticRouter(
 {
 }
 
+// Helper functions for each of the replies:
+
+void swapMacAddresses(sr_ethernet_hdr_t* hdr) {
+    uint8_t temp[ETHER_ADDR_LEN];
+    std::memcpy(temp, hdr->ether_dhost, ETHER_ADDR_LEN);
+    std::memcpy(hdr->ether_dhost, hdr->ether_shost, ETHER_ADDR_LEN);
+    std::memcpy(hdr->ether_shost, temp, ETHER_ADDR_LEN);
+}
+
+void swapIpAddresses(sr_ip_hdr_t* ip_hdr) {
+    uint32_t tmp = ip_hdr->ip_src;
+    ip_hdr->ip_src = ip_hdr->ip_dst;
+    ip_hdr->ip_dst = tmp;
+}
+
+void updateIpChecksum(sr_ip_hdr_t* ip_hdr) {
+    ip_hdr->ip_sum = 0;
+    ip_hdr->ip_sum = cksum(ip_hdr, ip_hdr->ip_hl * 4);
+}
+
+//Again, this could be part of the function and not as its standalone stuff. I will fix this later and make it more modular.
+std::vector<uint8_t> buildArpReply(const sr_arp_hdr_t* request, const mac_addr& our_mac, uint32_t our_ip) {
+    std::vector<uint8_t> packet(sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t));
+    
+    auto* eth = reinterpret_cast<sr_ethernet_hdr_t*>(packet.data());
+    auto* arp = reinterpret_cast<sr_arp_hdr_t*>(packet.data() + sizeof(sr_ethernet_hdr_t));
+
+    std::memcpy(eth->ether_dhost, request->ar_sha, ETHER_ADDR_LEN);
+    std::memcpy(eth->ether_shost, our_mac.data(), ETHER_ADDR_LEN);
+    eth->ether_type = htons(ETHERTYPE_ARP);
+
+    arp->ar_hrd = htons(arp_hrd_ethernet);
+    arp->ar_pro = htons(ethertype_ip);
+    arp->ar_hln = ETHER_ADDR_LEN;
+    arp->ar_pln = 4;
+    arp->ar_op  = htons(ARP_REPLY);
+
+    std::memcpy(arp->ar_sha, our_mac.data(), ETHER_ADDR_LEN);
+    arp->ar_sip = our_ip;
+    std::memcpy(arp->ar_tha, request->ar_sha, ETHER_ADDR_LEN);
+    arp->ar_tip = request->ar_sip;
+
+    return packet;
+}
+
+std::vector<uint8_t> buildIcmpEchoReply(const std::vector<uint8_t>& request) {
+    // We have this for now, but we should receive them as an argument later on
+    auto eth_hdr = reinterpret_cast<const sr_ethernet_hdr_t*>(request.data());
+    auto ip_hdr = reinterpret_cast<const sr_ip_hdr_t*>(request.data() + sizeof(sr_ethernet_hdr_t));
+    auto icmp_hdr = reinterpret_cast<const sr_icmp_hdr_t*>(
+        request.data() + sizeof(sr_ethernet_hdr_t) + ip_hdr->ip_hl * 4);
+
+    std::vector<uint8_t> reply(request);
+
+    // Swaps the MAC addresses
+    sr_ethernet_hdr_t* new_eth_hdr = reinterpret_cast<sr_ethernet_hdr_t*>(reply.data());
+    std::swap_ranges(new_eth_hdr->ether_dhost, new_eth_hdr->ether_dhost + ETHER_ADDR_LEN,
+                     new_eth_hdr->ether_shost);
+
+    // Swaps the IPs
+    sr_ip_hdr_t* new_ip_hdr = reinterpret_cast<sr_ip_hdr_t*>(reply.data() + sizeof(sr_ethernet_hdr_t));
+    uint32_t temp_ip = new_ip_hdr->ip_src;
+    new_ip_hdr->ip_src = new_ip_hdr->ip_dst;
+    new_ip_hdr->ip_dst = temp_ip;
+
+    new_ip_hdr->ip_ttl = 64;
+    new_ip_hdr->ip_sum = 0;
+    new_ip_hdr->ip_sum = cksum(new_ip_hdr, new_ip_hdr->ip_hl * 4);
+
+    // Sets ICMP type to echo reply
+    // I hope this works tho
+    sr_icmp_hdr_t* new_icmp_hdr = reinterpret_cast<sr_icmp_hdr_t*>(
+        reply.data() + sizeof(sr_ethernet_hdr_t) + new_ip_hdr->ip_hl * 4);
+    new_icmp_hdr->icmp_type = 0;
+    new_icmp_hdr->icmp_sum = 0;
+    int icmp_len = ntohs(new_ip_hdr->ip_len) - new_ip_hdr->ip_hl * 4;
+    new_icmp_hdr->icmp_sum = cksum(new_icmp_hdr, icmp_len);
+
+    return reply;
+}
+
 void StaticRouter::handlePacket(std::vector<uint8_t> packet, std::string iface)
 {
     std::unique_lock lock(mutex);
@@ -109,13 +190,13 @@ void StaticRouter::handlePacket(std::vector<uint8_t> packet, std::string iface)
             // Packet is destined for the router.
             if (ip_hdr->ip_p == IPPROTO_ICMP) {
                 sr_icmp_hdr_t* icmp_hdr = reinterpret_cast<sr_icmp_hdr_t*>(
-                    packet.data() + sizeof(sr_ethernet_hdr_t) + ip_hdr->ip_hl * 4);
+                packet.data() + sizeof(sr_ethernet_hdr_t) + ip_hdr->ip_hl * 4);
                 if (icmp_hdr->icmp_type == ICMP_ECHO) {
                     spdlog::info("Received ICMP echo request to router; sending echo reply.");
                     // TODO: Build an ICMP echo reply packet and send it.
                     // Example (pseudo-code):
-                    // Packet icmpReply = buildIcmpEchoReply(packet);
-                    // packetSender->sendPacket(icmpReply, iface);
+                    Packet icmpReply = buildIcmpEchoReply(packet);
+                    packetSender->sendPacket(icmpReply, iface);
                 }
             } else {
                 spdlog::info("Received TCP/UDP packet to router; sending ICMP port unreachable.");

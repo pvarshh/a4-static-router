@@ -70,6 +70,11 @@
         "unordered_set": "cpp",
         "variant": "cpp",
         "vector": "cpp",
-        "algorithm": "cpp"
+        "algorithm": "cpp",
+        "__config": "cpp",
+        "__threading_support": "cpp",
+        "cstddef": "cpp",
+        "ostream": "cpp",
+        "tuple": "cpp"
     }
 }
